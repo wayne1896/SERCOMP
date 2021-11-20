@@ -1,13 +1,20 @@
 package com.company.sercomp;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.support.v7.app.ActionBar;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.view.ContentInfo;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -17,17 +24,47 @@ import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 
 import com.company.sercomp.databinding.ActivityFullscreenBinding;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * An example full-screen activity that shows and hides the system UI (i.e.
  * status bar and navigation/system bar) with user interaction.
  */
 public class FullscreenActivity extends AppCompatActivity {
-    String URL ="http://192.168.1.117/tesis";
+    private static final int REQUEST_CODE_ASK_MULTIPLE_PERMISSIONS = 5;
+    String URL ="https://tesiscarlos1896.000webhostapp.com";
 
+    /**
+     * WebViewClient subclass loads all hyperlinks in the existing WebView
+     */
+    public class GeoWebViewClient extends WebViewClient {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            // When user clicks a hyperlink, load in the existing WebView
+            view.loadUrl(url);
+            return true;
+        }
+    }
 
+    /**
+     * WebChromeClient subclass handles UI-related calls
+     * Note: think chrome as in decoration, not the Chrome browser
+     */
+    public class GeoWebChromeClient extends WebChromeClient {
+        @Override
+        public void onGeolocationPermissionsShowPrompt(String origin,
+                                                       GeolocationPermissions.Callback callback) {
+
+            callback.invoke(origin, true, false);
+        }
+    }
+
+    WebView mWebView;
 
     /**
      * Whether or not the system UI should be auto-hidden after
@@ -119,29 +156,25 @@ public class FullscreenActivity extends AppCompatActivity {
 
         binding = ActivityFullscreenBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
-        WebView view= (WebView) this.findViewById(R.id.webView);
+
+        askRuntimePermission();
+        mWebView = findViewById(R.id.webView);
+        // Brower niceties -- pinch / zoom, follow links in place
+        mWebView.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
+        mWebView.getSettings().setBuiltInZoomControls(true);
+        mWebView.setWebViewClient(new GeoWebViewClient());
+        // Below required for geolocation
+        mWebView.getSettings().setJavaScriptEnabled(true);
+        mWebView.getSettings().setGeolocationEnabled(true);
+        mWebView.setWebChromeClient(new GeoWebChromeClient());
+        mWebView.getSettings().setGeolocationDatabasePath( getFilesDir().getPath() );
+        mWebView.loadUrl(URL);
 
 
-        view.getSettings().setJavaScriptEnabled(true);
-        view.getSettings().setDomStorageEnabled(true);
-        view.setWebViewClient(new WebViewClient(){
-
-            public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
-                callback.invoke(origin, true, true);
-                
-            }
-        });
-        view.loadUrl(URL);
-
-
-        view.setDownloadListener(new DownloadListener() {
-            public void onDownloadStart(String URL, String userAgent,
-                                        String contentDisposition, String mimetype,
-                                        long contentLength) {
-                Intent i = new Intent(Intent.ACTION_VIEW);
-                i.setData(Uri.parse(URL));
-                startActivity(i);
-            }
+        mWebView.setDownloadListener((URL, userAgent, contentDisposition, mimetype, contentLength) -> {
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setData(Uri.parse(URL));
+            startActivity(i);
         });
 
         mVisible = true;
@@ -220,4 +253,65 @@ public class FullscreenActivity extends AppCompatActivity {
         mHideHandler.removeCallbacks(mHideRunnable);
         mHideHandler.postDelayed(mHideRunnable, delayMillis);
     }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private void askRuntimePermission() {
+        List<String> permissionsNeeded = new ArrayList<String>();
+
+        final List<String> permissionsList = new ArrayList<String>();
+        if (!addPermission(permissionsList, Manifest.permission.ACCESS_FINE_LOCATION))
+            permissionsNeeded.add("Show Location");
+
+        if (permissionsList.size() > 0) {
+            if (permissionsNeeded.size() > 0) {
+
+                // Need Rationale
+                String message = "App need access to " + permissionsNeeded.get(0);
+
+                for (int i = 1; i < permissionsNeeded.size(); i++)
+                    message = message + ", " + permissionsNeeded.get(i);
+
+                showMessageOKCancel(message,this,
+                        new DialogInterface.OnClickListener() {
+
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                requestPermissions(permissionsList.toArray(new String[permissionsList.size()]),
+                                        REQUEST_CODE_ASK_MULTIPLE_PERMISSIONS);
+                            }
+                        });
+                return;
+            }
+            requestPermissions(permissionsList.toArray(new String[permissionsList.size()]),
+                    REQUEST_CODE_ASK_MULTIPLE_PERMISSIONS);
+            return;
+        }
+
+        Toast.makeText(this, "No new Permission Required- Launching App .You are Awesome!!", Toast.LENGTH_SHORT)
+                .show();
+    }
+
+
+    private void showMessageOKCancel(String message, Context context, DialogInterface.OnClickListener okListener) {
+        new AlertDialog.Builder(context)
+                .setMessage(message)
+                .setPositiveButton("OK", okListener)
+                .setCancelable(false)
+                .setNegativeButton("Cancel", null)
+                .create()
+                .show();
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private boolean addPermission(List<String> permissionsList, String permission) {
+
+        if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+            permissionsList.add(permission);
+            // Check for Rationale Option
+            if (!shouldShowRequestPermissionRationale(permission))
+                return false;
+        }
+        return true;
+    }
+
 }
